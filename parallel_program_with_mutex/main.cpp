@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <ctime>
 #include <chrono>
+#include <vector>
+#include <cmath>
 
 struct Node {
     int data;
@@ -90,9 +92,10 @@ void* ThreadFunc(void* arg) {
 }
 
 int main() {
-    Node* head = nullptr;
     int n = 1000;
     int num_threads = 4;
+    int num_runs = 10; // Number of times to run the test
+    std::vector<double> times;
     pthread_t threads[num_threads];
 
     srand(time(0));
@@ -100,25 +103,55 @@ int main() {
     pthread_mutex_init(&list_mutex, nullptr);
     pthread_mutex_init(&print_mutex, nullptr);
 
-    for (int i = 0; i < n; i++) {
-        int value = rand() % 65536;
-        Insert(head, value);
+    for (int run = 0; run < num_runs; ++run) {
+        Node* head = nullptr;
+
+        for (int i = 0; i < n; i++) {
+            int value = rand() % 65536;
+            Insert(head, value);
+        }
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for (int i = 0; i < num_threads; i++) {
+            pthread_create(&threads[i], nullptr, ThreadFunc, head);
+        }
+
+        for (int i = 0; i < num_threads; i++) {
+            pthread_join(threads[i], nullptr);
+        }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> duration = end - start; // Duration in milliseconds
+        times.push_back(duration.count());
+        std::cout << "Run " << run + 1 << ": " << duration.count() << " milliseconds" << std::endl;
+
+        // Clean up the list
+        Node* current = head;
+        while (current != nullptr) {
+            Node* next = current->next;
+            delete current;
+            current = next;
+        }
     }
 
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (int i = 0; i < num_threads; i++) {
-        pthread_create(&threads[i], nullptr, ThreadFunc, head);
+    // Calculate mean time
+    double sum = 0;
+    for (double time : times) {
+        sum += time;
     }
+    double mean = sum / num_runs;
 
-    for (int i = 0; i < num_threads; i++) {
-        pthread_join(threads[i], nullptr);
+    // Calculate standard deviation
+    double variance = 0;
+    for (double time : times) {
+        variance += (time - mean) * (time - mean);
     }
+    variance /= num_runs;
+    double stdDev = std::sqrt(variance);
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration = end - start;
-
-    std::cout << "Execution Time: " << duration.count() << " seconds" << std::endl;
+    std::cout << "Mean Execution Time: " << mean << " milliseconds" << std::endl;
+    std::cout << "Standard Deviation: " << stdDev << " milliseconds" << std::endl;
 
     pthread_mutex_destroy(&list_mutex);
     pthread_mutex_destroy(&print_mutex);

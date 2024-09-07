@@ -3,7 +3,8 @@
 #include <ctime>
 #include <iostream>
 #include <chrono>
-
+#include <vector>
+#include <cmath>
 
 const int NUM_THREADS = 4;
 const int N = 1000;
@@ -11,7 +12,6 @@ const int M = 10000;
 const float M_MEMBER = 0.99f;
 const float M_INSERT = 0.005f;
 const float M_DELETE = 0.005f;
-
 
 struct Node {
     int data;
@@ -124,35 +124,58 @@ void* threadFunc(void* arg) {
 }
 
 int main() {
-    LinkedList list;
-    srand(time(nullptr));
+    int num_runs = 10; // Number of times to run the test
+    std::vector<double> times;
 
-    for (int i = 0; i < N; i++) {
-        list.Insert(rand() % (1 << 16));
+    for (int run = 0; run < num_runs; ++run) {
+        LinkedList list;
+        srand(time(nullptr) + run); // Seed with unique value for each run
+
+        for (int i = 0; i < N; i++) {
+            list.Insert(rand() % (1 << 16));
+        }
+
+        pthread_t threads[NUM_THREADS];
+        ThreadData thread_data[NUM_THREADS];
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for (int i = 0; i < NUM_THREADS; i++) {
+            thread_data[i].list = &list;
+            thread_data[i].num_operations = M / NUM_THREADS;
+            thread_data[i].mMember = M_MEMBER;
+            thread_data[i].mInsert = M_INSERT;
+            thread_data[i].mDelete = M_DELETE;
+            pthread_create(&threads[i], nullptr, threadFunc, &thread_data[i]);
+        }
+
+        for (int i = 0; i < NUM_THREADS; i++) {
+            pthread_join(threads[i], nullptr);
+        }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> duration = end - start; // Duration in milliseconds
+        times.push_back(duration.count());
+        std::cout << "Run " << run + 1 << ": " << duration.count() << " milliseconds" << std::endl;
     }
 
-    pthread_t threads[NUM_THREADS];
-    ThreadData thread_data[NUM_THREADS];
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-        thread_data[i].list = &list;
-        thread_data[i].num_operations = M / NUM_THREADS;
-        thread_data[i].mMember = M_MEMBER;
-        thread_data[i].mInsert = M_INSERT;
-        thread_data[i].mDelete = M_DELETE;
-        pthread_create(&threads[i], nullptr, threadFunc, &thread_data[i]);
+    // Calculate mean time
+    double sum = 0;
+    for (double time : times) {
+        sum += time;
     }
+    double mean = sum / num_runs;
 
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_join(threads[i], nullptr);
+    // Calculate standard deviation
+    double variance = 0;
+    for (double time : times) {
+        variance += (time - mean) * (time - mean);
     }
+    variance /= num_runs;
+    double stdDev = std::sqrt(variance);
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration = end - start;
-
-    std::cout << "Execution Time: " << duration.count() << " seconds" << std::endl;
+    std::cout << "Mean Execution Time: " << mean << " milliseconds" << std::endl;
+    std::cout << "Standard Deviation: " << stdDev << " milliseconds" << std::endl;
 
     return 0;
 }
