@@ -10,6 +10,8 @@ const int M = 10000;
 const float M_MEMBER = 0.99f;
 const float M_INSERT = 0.005f;
 const float M_DELETE = 0.005f;
+const int THRESHOLD=65536;
+const int NUMBER_OF_RUNS=100;
 
 struct Node {
     int data;
@@ -19,8 +21,21 @@ struct Node {
 void Insert(Node*& head, int value) {
     Node* newNode = new Node();
     newNode->data = value;
-    newNode->next = head;
-    head = newNode;
+    newNode->next = nullptr;
+
+    if (head == nullptr || head->data >= value) {
+        newNode->next = head;
+        head = newNode;
+        return;
+    }
+
+    Node* current = head;
+    while (current->next != nullptr && current->next->data < value) {
+        current = current->next;
+    }
+
+    newNode->next = current->next;
+    current->next = newNode;
 }
 
 void Delete(Node*& head, int value) {
@@ -55,12 +70,10 @@ bool Member(Node* head, int value) {
 }
 
 int main() {
-    int numRuns = 20;
-
     std::vector<double> times;
     srand(time(0));
 
-    for (int run = 0; run < numRuns; ++run) {
+    for (int run = 0; run < NUMBER_OF_RUNS; ++run) {
         Node* head = nullptr;
         int n = N;
         int m = M;
@@ -68,52 +81,49 @@ int main() {
         int mInsert = M_INSERT * m;
         int mDelete = M_DELETE * m;
 
-        // Populate the list with n random unique values
         for (int i = 0; i < n; i++) {
-            int value = rand() % 65536;
-            Insert(head, value);
+            int value = rand() % THRESHOLD;
+            if (!Member(head, value)) {
+                Insert(head, value);
+            }
         }
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // Perform m operations (Member, Insert, Delete)
-        for (int i = 0; i < m; i++) {
-            int operation = rand() % 3;
-            int value = rand() % 65536;
+        for (int i = 0; i < mInsert; i++) {
+            int value = rand() % THRESHOLD;
+            if (!Member(head, value)) {
+                Insert(head, value);
+            }
+        }
 
-            if (operation == 0 && mMember > 0) {
-                Member(head, value);
-                mMember--;
-            } else if (operation == 1 && mInsert > 0) {
-                if (!Member(head, value)) {
-                    Insert(head, value);
-                }
-                mInsert--;
-            } else if (operation == 2 && mDelete > 0) {
+        for (int i = 0; i < mMember; i++) {
+            int value = rand() % THRESHOLD;
+            Member(head, value);
+        }
+        for (int i = 0; i < mDelete; i++) {
+            int value = rand() % THRESHOLD;
+            if (!Member(head, value)) {
                 Delete(head, value);
-                mDelete--;
             }
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> duration = end - start;
         times.push_back(duration.count());
-        std::cout << "Run " << run + 1 << ": " << duration.count() << " milliseconds" << std::endl;
     }
 
-    // Calculate mean time
     double sum = 0;
     for (double time : times) {
         sum += time;
     }
-    double mean = sum / numRuns;
+    double mean = sum / NUMBER_OF_RUNS;
 
-    // Calculate standard deviation
     double variance = 0;
     for (double time : times) {
         variance += (time - mean) * (time - mean);
     }
-    variance /= numRuns;
+    variance /= NUMBER_OF_RUNS;
     double stdDev = std::sqrt(variance);
 
     std::cout << "Mean Execution Time: " << mean << " milliseconds" << std::endl;

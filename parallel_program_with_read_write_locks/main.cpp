@@ -1,162 +1,163 @@
-#include <pthread.h>
+#include <iostream>
 #include <cstdlib>
 #include <ctime>
-#include <iostream>
 #include <chrono>
-#include <vector>
 #include <cmath>
+#include <vector>
+#include <pthread.h>
 
-const int NUM_THREADS = 4;
 const int N = 1000;
 const int M = 10000;
 const float M_MEMBER = 0.99f;
 const float M_INSERT = 0.005f;
 const float M_DELETE = 0.005f;
+const int THRESHOLD = 65536;
+const int NUMBER_OF_THREADS = 8;
+const int NUMBER_OF_RUNS=100;
 
 struct Node {
     int data;
     Node* next;
-    Node(int value) : data(value), next(nullptr) {}
-};
-
-class LinkedList {
-private:
-    Node* head;
-    pthread_rwlock_t rwlock;
-
-public:
-    LinkedList() : head(nullptr) {
-        pthread_rwlock_init(&rwlock, nullptr);
-    }
-
-    ~LinkedList() {
-        Node* current = head;
-        while (current != nullptr) {
-            Node* next = current->next;
-            delete current;
-            current = next;
-        }
-        pthread_rwlock_destroy(&rwlock);
-    }
-
-    bool Member(int value) {
-        pthread_rwlock_rdlock(&rwlock);
-        Node* current = head;
-        while (current != nullptr) {
-            if (current->data == value) {
-                pthread_rwlock_unlock(&rwlock);
-                return true;
-            }
-            current = current->next;
-        }
-        pthread_rwlock_unlock(&rwlock);
-        return false;
-    }
-
-    void Insert(int value) {
-        pthread_rwlock_wrlock(&rwlock);
-        Node* newNode = new Node(value);
-        newNode->next = head;
-        head = newNode;
-        pthread_rwlock_unlock(&rwlock);
-    }
-
-    bool Delete(int value) {
-        pthread_rwlock_wrlock(&rwlock);
-        Node* current = head;
-        Node* previous = nullptr;
-
-        while (current != nullptr && current->data != value) {
-            previous = current;
-            current = current->next;
-        }
-
-        if (current == nullptr) {
-            pthread_rwlock_unlock(&rwlock);
-            return false;
-        }
-
-        if (previous == nullptr) {
-            head = current->next;
-        } else {
-            previous->next = current->next;
-        }
-
-        delete current;
-        pthread_rwlock_unlock(&rwlock);
-        return true;
-    }
-
-    void Print() {
-        pthread_rwlock_rdlock(&rwlock);
-        Node* current = head;
-        while (current != nullptr) {
-            std::cout << current->data << " ";
-            current = current->next;
-        }
-        std::cout << std::endl;
-        pthread_rwlock_unlock(&rwlock);
-    }
 };
 
 struct ThreadData {
-    LinkedList* list;
-    int num_operations;
-    float mMember, mInsert, mDelete;
+    int thread_index;
 };
 
-void* threadFunc(void* arg) {
-    ThreadData* data = (ThreadData*)arg;
-    LinkedList* list = data->list;
+Node* head = nullptr;
+pthread_rwlock_t list_rwlock;
 
-    for (int i = 0; i < data->num_operations; i++) {
-        float random = static_cast<float>(rand()) / RAND_MAX;
+void Insert(Node*& head, int value) {
+    pthread_rwlock_wrlock(&list_rwlock); // Acquire write lock
 
-        if (random < data->mMember) {
-            list->Member(rand() % (1 << 16));
-        } else if (random < data->mMember + data->mInsert) {
-            list->Insert(rand() % (1 << 16));
-        } else {
-            list->Delete(rand() % (1 << 16));
+    Node* newNode = new Node();
+    newNode->data = value;
+    newNode->next = nullptr;
+
+    if (head == nullptr || head->data >= value) {
+        newNode->next = head;
+        head = newNode;
+    } else {
+        Node* current = head;
+        while (current->next != nullptr && current->next->data < value) {
+            current = current->next;
+        }
+        newNode->next = current->next;
+        current->next = newNode;
+    }
+
+    pthread_rwlock_unlock(&list_rwlock); // Release write lock
+}
+
+void Delete(Node*& head, int value) {
+    pthread_rwlock_wrlock(&list_rwlock); // Acquire write lock
+
+    Node* temp = head;
+    Node* prev = nullptr;
+
+    if (temp != nullptr && temp->data == value) {
+        head = temp->next;
+        delete temp;
+        pthread_rwlock_unlock(&list_rwlock);
+        return;
+    }
+
+    while (temp != nullptr && temp->data != value) {
+        prev = temp;
+        temp = temp->next;
+    }
+
+    if (temp == nullptr) {
+        pthread_rwlock_unlock(&list_rwlock);
+        return;
+    }
+
+    prev->next = temp->next;
+    delete temp;
+
+    pthread_rwlock_unlock(&list_rwlock);  // Release write lock
+}
+
+bool Member(Node* head, int value) {
+    pthread_rwlock_rdlock(&list_rwlock); // Acquire read lock
+
+    Node* temp = head;
+    while (temp != nullptr) {
+        if (temp->data == value) {
+            pthread_rwlock_unlock(&list_rwlock);
+            return true;
+        }
+        temp = temp->next;
+    }
+
+    pthread_rwlock_unlock(&list_rwlock);  // Release read lock
+    return false;
+}
+
+void* ThreadWork(void* arg) {
+    int workLoadOnThreads = M / NUMBER_OF_THREADS;
+    int mMember = M_MEMBER * workLoadOnThreads;
+    int mInsert = M_INSERT * workLoadOnThreads;
+    int mDelete = M_DELETE * workLoadOnThreads;
+
+    for (int i = 0; i < mInsert; i++) {
+        int value = rand() % THRESHOLD;
+        if (!Member(head, value)) {
+            Insert(head, value);
         }
     }
+
+    for (int i = 0; i < mMember; i++) {
+        int value = rand() % THRESHOLD;
+        Member(head, value);
+    }
+
+    for (int i = 0; i < mDelete; i++) {
+        int value = rand() % THRESHOLD;
+        if (!Member(head, value)) {
+            Delete(head, value);
+        }
+    }
+
     return nullptr;
 }
 
 int main() {
-    int num_runs = 10; // Number of times to run the test
     std::vector<double> times;
+    srand(time(0));
 
-    for (int run = 0; run < num_runs; ++run) {
-        LinkedList list;
-        srand(time(nullptr) + run); // Seed with unique value for each run
+    for (int run = 0; run < NUMBER_OF_RUNS; ++run) {
+        head = nullptr;
+        pthread_rwlock_init(&list_rwlock, nullptr);
 
         for (int i = 0; i < N; i++) {
-            list.Insert(rand() % (1 << 16));
+            int value = rand() % THRESHOLD;
+            if (!Member(head, value)) {
+                Insert(head, value);
+            }
         }
 
-        pthread_t threads[NUM_THREADS];
-        ThreadData thread_data[NUM_THREADS];
-
+        pthread_t threads[NUMBER_OF_THREADS];
         auto start = std::chrono::high_resolution_clock::now();
 
-        for (int i = 0; i < NUM_THREADS; i++) {
-            thread_data[i].list = &list;
-            thread_data[i].num_operations = M / NUM_THREADS;
-            thread_data[i].mMember = M_MEMBER;
-            thread_data[i].mInsert = M_INSERT;
-            thread_data[i].mDelete = M_DELETE;
-            pthread_create(&threads[i], nullptr, threadFunc, &thread_data[i]);
+        for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
+            pthread_create(&threads[i], nullptr, ThreadWork, nullptr);
         }
 
-        for (int i = 0; i < NUM_THREADS; i++) {
+        for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
             pthread_join(threads[i], nullptr);
         }
 
         auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> duration = end - start; // Duration in milliseconds
+        std::chrono::duration<double, std::milli> duration = end - start;
         times.push_back(duration.count());
-        std::cout << "Run " << run + 1 << ": " << duration.count() << " milliseconds" << std::endl;
+
+        pthread_rwlock_destroy(&list_rwlock);
+        while (head != nullptr) {
+            Node* temp = head;
+            head = head->next;
+            delete temp;
+        }
     }
 
     // Calculate mean time
@@ -164,14 +165,14 @@ int main() {
     for (double time : times) {
         sum += time;
     }
-    double mean = sum / num_runs;
+    double mean = sum / NUMBER_OF_RUNS;
 
     // Calculate standard deviation
     double variance = 0;
     for (double time : times) {
         variance += (time - mean) * (time - mean);
     }
-    variance /= num_runs;
+    variance /= NUMBER_OF_RUNS;
     double stdDev = std::sqrt(variance);
 
     std::cout << "Mean Execution Time: " << mean << " milliseconds" << std::endl;

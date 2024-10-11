@@ -1,32 +1,55 @@
 #include <iostream>
-#include <pthread.h>
 #include <cstdlib>
 #include <ctime>
 #include <chrono>
-#include <vector>
 #include <cmath>
+#include <vector>
+#include <pthread.h>
+
+const int N = 1000;
+const int M = 10000;
+const float M_MEMBER = 0.99f;
+const float M_INSERT = 0.005f;
+const float M_DELETE = 0.005f;
+const int THRESHOLD = 65536;
+const int NUMBER_OF_THREADS =4;
+const int NUMBER_OF_RUNS=100;
 
 struct Node {
     int data;
-    Node* next;
+    Node *next;
 };
 
+Node *head = nullptr;
 pthread_mutex_t list_mutex;
-pthread_mutex_t print_mutex;
 
-void Insert(Node*& head, int value) {
+void Insert(Node *&head, int value) {
     pthread_mutex_lock(&list_mutex);
-    Node* newNode = new Node();
+
+    Node *newNode = new Node();
     newNode->data = value;
-    newNode->next = head;
-    head = newNode;
+    newNode->next = nullptr;
+
+    if (head == nullptr || head->data >= value) {
+        newNode->next = head;
+        head = newNode;
+    } else {
+        Node *current = head;
+        while (current->next != nullptr && current->next->data < value) {
+            current = current->next;
+        }
+        newNode->next = current->next;
+        current->next = newNode;
+    }
+
     pthread_mutex_unlock(&list_mutex);
 }
 
-void Delete(Node*& head, int value) {
+void Delete(Node *&head, int value) {
     pthread_mutex_lock(&list_mutex);
-    Node* temp = head;
-    Node* prev = nullptr;
+
+    Node *temp = head;
+    Node *prev = nullptr;
 
     if (temp != nullptr && temp->data == value) {
         head = temp->next;
@@ -47,12 +70,14 @@ void Delete(Node*& head, int value) {
 
     prev->next = temp->next;
     delete temp;
+
     pthread_mutex_unlock(&list_mutex);
 }
 
-bool Member(Node* head, int value) {
+bool Member(Node *head, int value) {
     pthread_mutex_lock(&list_mutex);
-    Node* temp = head;
+
+    Node *temp = head;
     while (temp != nullptr) {
         if (temp->data == value) {
             pthread_mutex_unlock(&list_mutex);
@@ -64,97 +89,87 @@ bool Member(Node* head, int value) {
     return false;
 }
 
-void* ThreadFunc(void* arg) {
-    Node* head = static_cast<Node*>(arg);
-    int m = 10000;
-    int mMember = 0.99 * m;
-    int mInsert = 0.005 * m;
-    int mDelete = 0.005 * m;
+void *ThreadWork(void *arg) {
+    int workloadOnThread = M / NUMBER_OF_THREADS;
+    int mMember = M_MEMBER * workloadOnThread;
+    int mInsert = M_INSERT * workloadOnThread;
+    int mDelete = M_DELETE * workloadOnThread;
 
-    for (int i = 0; i < m; i++) {
-        int operation = rand() % 3;
-        int value = rand() % 65536;
+    for (int i = 0; i < mInsert; i++) {
+        int value = rand() % THRESHOLD;
+        if (!Member(head, value)) {
+            Insert(head, value);
+        }
+    }
 
-        if (operation == 0 && mMember > 0) {
-            Member(head, value);
-            mMember--;
-        } else if (operation == 1 && mInsert > 0) {
-            if (!Member(head, value)) {
-                Insert(head, value);
-            }
-            mInsert--;
-        } else if (operation == 2 && mDelete > 0) {
+    for (int i = 0; i < mMember; i++) {
+        int value = rand() % THRESHOLD;
+        Member(head, value);
+    }
+    for (int i = 0; i < mDelete; i++) {
+        int value = rand() % THRESHOLD;
+        if (!Member(head, value)) {
             Delete(head, value);
-            mDelete--;
         }
     }
     return nullptr;
 }
 
 int main() {
-    int n = 1000;
-    int num_threads = 4;
-    int num_runs = 10; // Number of times to run the test
     std::vector<double> times;
-    pthread_t threads[num_threads];
-
     srand(time(0));
 
-    pthread_mutex_init(&list_mutex, nullptr);
-    pthread_mutex_init(&print_mutex, nullptr);
+    for (int run = 0; run < NUMBER_OF_RUNS; ++run) {
+        head = nullptr;
+        pthread_mutex_init(&list_mutex, nullptr);
 
-    for (int run = 0; run < num_runs; ++run) {
-        Node* head = nullptr;
-
-        for (int i = 0; i < n; i++) {
-            int value = rand() % 65536;
-            Insert(head, value);
+        for (int i = 0; i < N; i++) {
+            int value = rand() % THRESHOLD;
+            if (!Member(head, value)) {
+                Insert(head, value);
+            }
         }
 
+        pthread_t threads[NUMBER_OF_THREADS];
         auto start = std::chrono::high_resolution_clock::now();
 
-        for (int i = 0; i < num_threads; i++) {
-            pthread_create(&threads[i], nullptr, ThreadFunc, head);
+        for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
+            pthread_create(&threads[i], nullptr, ThreadWork, nullptr);
         }
 
-        for (int i = 0; i < num_threads; i++) {
+        for (int i = 0; i < NUMBER_OF_THREADS; ++i) {
             pthread_join(threads[i], nullptr);
         }
 
         auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> duration = end - start; // Duration in milliseconds
+        std::chrono::duration<double, std::milli> duration = end - start;
         times.push_back(duration.count());
-        std::cout << "Run " << run + 1 << ": " << duration.count() << " milliseconds" << std::endl;
 
-        // Clean up the list
-        Node* current = head;
-        while (current != nullptr) {
-            Node* next = current->next;
-            delete current;
-            current = next;
+        pthread_mutex_destroy(&list_mutex);
+        while (head != nullptr) {
+            Node *temp = head;
+            head = head->next;
+            delete temp;
         }
     }
 
-    // Calculate mean time
+    // Calculate mean
     double sum = 0;
-    for (double time : times) {
+    for (double time: times) {
         sum += time;
     }
-    double mean = sum / num_runs;
+    double mean = sum / NUMBER_OF_RUNS;
 
     // Calculate standard deviation
     double variance = 0;
-    for (double time : times) {
+    for (double time: times) {
         variance += (time - mean) * (time - mean);
     }
-    variance /= num_runs;
+    variance /= NUMBER_OF_RUNS;
     double stdDev = std::sqrt(variance);
 
     std::cout << "Mean Execution Time: " << mean << " milliseconds" << std::endl;
     std::cout << "Standard Deviation: " << stdDev << " milliseconds" << std::endl;
-
-    pthread_mutex_destroy(&list_mutex);
-    pthread_mutex_destroy(&print_mutex);
 
     return 0;
 }
