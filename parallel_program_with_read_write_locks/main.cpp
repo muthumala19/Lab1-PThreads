@@ -12,16 +12,12 @@ const float M_MEMBER = 0.99f;
 const float M_INSERT = 0.005f;
 const float M_DELETE = 0.005f;
 const int THRESHOLD = 65536;
-const int NUMBER_OF_THREADS = 8;
+const int NUMBER_OF_THREADS = 1;
 const int NUMBER_OF_RUNS=100;
 
 struct Node {
     int data;
     Node* next;
-};
-
-struct ThreadData {
-    int thread_index;
 };
 
 Node* head = nullptr;

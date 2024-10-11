@@ -74,19 +74,18 @@ int main() {
     srand(time(0));
 
     for (int run = 0; run < NUMBER_OF_RUNS; ++run) {
-        Node* head = nullptr;
-        int n = N;
-        int m = M;
-        int mMember = M_MEMBER * m;
-        int mInsert = M_INSERT * m;
-        int mDelete = M_DELETE * m;
 
-        for (int i = 0; i < n; i++) {
+        Node* head = nullptr;
+        for (int i = 0; i < N; i++) {
             int value = rand() % THRESHOLD;
             if (!Member(head, value)) {
                 Insert(head, value);
             }
         }
+
+        int mMember = M_MEMBER * M;
+        int mInsert = M_INSERT * M;
+        int mDelete = M_DELETE * M;
 
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -96,7 +95,6 @@ int main() {
                 Insert(head, value);
             }
         }
-
         for (int i = 0; i < mMember; i++) {
             int value = rand() % THRESHOLD;
             Member(head, value);
